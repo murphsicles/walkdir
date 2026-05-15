@@ -1,0 +1,156 @@
+// Auto-converted from /tmp/df-walkdir-2.5.0/walkdir-2.5.0/src/dent.rs
+
+use std::ffi::OsStr;
+use std::fmt;
+use std::fs::{ self, FileType };
+use std::path::{ Path, PathBuf };
+use crate::error::Error;
+use crate::Result;
+/// A directory entry.
+/// 
+/// This is the type of value that is yielded from the iterators defined in
+/// this crate.
+/// 
+/// On Unix systems, this type implements the [`DirEntryExt`] trait, which
+/// provides efficient access to the inode number of the directory entry.
+/// 
+/// # Differences with `std::fs::DirEntry`
+/// 
+/// This type mostly mirrors the type by the same name in [`std::fs`]. There
+/// are some differences however:
+/// 
+/// *All recursive directory iterators must inspect the entry's type.
+/// Therefore, the value is stored and its access is guaranteed to be cheap and
+/// successful.
+/// * [`path`] and [`file_name`] return borrowed variants.
+/// *If [`follow_links`] was enabled on the originating iterator, then all
+/// operations except for [`path`] operate on the link target. Otherwise, all
+/// operations operate on the symbolic link.
+/// 
+/// [`std::fs`]: https://doc.rust-lang.org/stable/std/fs/index.html
+/// [`path`]: #method.path
+/// [`file_name`]: #method.file_name
+/// [`follow_links`]: struct.WalkDir.html#method.follow_links
+/// [`DirEntryExt`]: trait.DirEntryExt.html
+pub struct DirEntry {
+ path: PathBuf,
+ ty: FileType,
+ follow_link: bool,
+ depth: usize,
+ ino: u64,
+ metadata: fs::Metadata,
+}
+
+impl DirEntry {
+ pub fn path(&self) -> &Path {
+ &self.path
+ }
+ 
+ pub fn into_path(self) -> PathBuf {
+ self.path
+ }
+ 
+ pub fn path_is_symlink(&self) -> bool {
+ self.ty.is_symlink() || self.follow_link
+ }
+ 
+ pub fn metadata(&self) -> Result<fs::Metadata> {
+ self.metadata_internal()
+ }
+ 
+ fn metadata_internal(&self) -> Result<fs::Metadata> {
+ if self.follow_link { fs::metadata(&self.path) } else { Ok(self.metadata.clone()) } . map_err(| err | Error::from_entry(self, err))
+ }
+ 
+ fn metadata_internal(&self) -> Result<fs::Metadata> {
+ if self.follow_link { fs::metadata(&self.path) } else { fs::symlink_metadata(&self.path) } . map_err(| err | Error::from_entry(self, err))
+ }
+ 
+ pub fn file_type(&self) -> fs::FileType {
+ self.ty
+ }
+ 
+ pub fn file_name(&self) -> &OsStr {
+ self.path.file_name().unwrap_or_else(| | self.path.as_os_str())
+ }
+ 
+ pub fn depth(&self) -> usize {
+ self.depth
+ }
+ 
+ fn is_dir(&self) -> bool {
+ self.ty.is_dir()
+ }
+ 
+ fn from_entry(depth: usize, ent: &fs::DirEntry) -> Result<DirEntry> {
+ let path = ent.path();
+ let ty = ent.file_type().map_err(| err | Error::from_path(depth, path.clone(), err)) ?;
+ let md = ent.metadata().map_err(| err | Error::from_path(depth, path.clone(), err)) ?;
+ Ok(DirEntry { path, ty, follow_link: false, depth, metadata: md })
+ }
+ 
+ fn from_entry(depth: usize, ent: &fs::DirEntry) -> Result<DirEntry> {
+ use std::os::unix::fs::DirEntryExt;
+ let ty = ent.file_type().map_err(| err | Error::from_path(depth, ent.path(), err)) ?;
+ Ok(DirEntry { path: ent.path(), ty, follow_link: false, depth, ino: ent.ino() })
+ }
+ 
+ fn from_entry(depth: usize, ent: &fs::DirEntry) -> Result<DirEntry> {
+ let ty = ent.file_type().map_err(| err | Error::from_path(depth, ent.path(), err)) ?;
+ Ok(DirEntry { path: ent.path(), ty, follow_link: false, depth })
+ }
+ 
+ fn from_path(depth: usize, pb: PathBuf, follow: bool) -> Result<DirEntry> {
+ let md = if follow { fs::metadata(&pb).map_err(| err | Error::from_path(depth, pb.clone(), err)) ? } else { fs::symlink_metadata(&pb).map_err(| err | Error::from_path(depth, pb.clone(), err)) ? };
+ Ok(DirEntry { path: pb, ty: md.file_type(), follow_link: follow, depth, metadata: md })
+ }
+ 
+ fn from_path(depth: usize, pb: PathBuf, follow: bool) -> Result<DirEntry> {
+ use std::os::unix::fs::MetadataExt;
+ let md = if follow { fs::metadata(&pb).map_err(| err | Error::from_path(depth, pb.clone(), err)) ? } else { fs::symlink_metadata(&pb).map_err(| err | Error::from_path(depth, pb.clone(), err)) ? };
+ Ok(DirEntry { path: pb, ty: md.file_type(), follow_link: follow, depth, ino: md.ino() })
+ }
+ 
+ fn from_path(depth: usize, pb: PathBuf, follow: bool) -> Result<DirEntry> {
+ let md = if follow { fs::metadata(&pb).map_err(| err | Error::from_path(depth, pb.clone(), err)) ? } else { fs::symlink_metadata(&pb).map_err(| err | Error::from_path(depth, pb.clone(), err)) ? };
+ Ok(DirEntry { path: pb, ty: md.file_type(), follow_link: follow, depth })
+ }
+ 
+}
+
+impl Clone for DirEntry {
+ fn clone(&self) -> DirEntry {
+ DirEntry { path: self.path.clone(), ty: self.ty, follow_link: self.follow_link, depth: self.depth, metadata: self.metadata.clone() }
+ }
+ 
+ fn clone(&self) -> DirEntry {
+ DirEntry { path: self.path.clone(), ty: self.ty, follow_link: self.follow_link, depth: self.depth, ino: self.ino }
+ }
+ 
+ fn clone(&self) -> DirEntry {
+ DirEntry { path: self.path.clone(), ty: self.ty, follow_link: self.follow_link, depth: self.depth }
+ }
+ 
+}
+
+impl fmt::Debug for DirEntry {
+ fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+ write!(f, "DirEntry({:?})", self.path)
+ }
+ 
+}
+
+/// Unix-specific extension methods for `walkdir::DirEntry`
+#[cfg(unix)]
+pub trait DirEntryExt {
+ fn ino(&self) -> u64
+}
+
+#[cfg(unix)]
+impl DirEntryExt for DirEntry {
+ fn ino(&self) -> u64 {
+ self.ino
+ }
+ 
+}
+

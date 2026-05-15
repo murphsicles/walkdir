@@ -1,0 +1,7 @@
+[package]
+name = "@fs/walkdir"
+version = "2.5.0"
+description = "Recursive directory walking for Zeta"
+license = "MIT"
+repository = "https://github.com/murphsicles/walkdir"
+readme = "README.md"
